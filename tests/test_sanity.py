@@ -21,16 +21,15 @@ class sanity(RunnerCore):
   @classmethod
   def setUpClass(self):
     super(RunnerCore, self).setUpClass()
+    assert os.path.exists(CONFIG_FILE), 'To run these tests, we need a (working!) %s file to already exist' % EM_CONFIG
+    assert not os.environ.get('EMCC_DEBUG'), 'do not run sanity checks in debug mode!'
+    assert not os.environ.get('EMCC_WASM_BACKEND'), 'do not force wasm backend either way in sanity checks!'
     shutil.copyfile(CONFIG_FILE, CONFIG_FILE + '_backup')
 
     print
     print 'Running sanity checks.'
     print 'WARNING: This will modify %s, and in theory can break it although it should be restored properly. A backup will be saved in %s_backup' % (EM_CONFIG, EM_CONFIG)
     print
-
-    assert os.path.exists(CONFIG_FILE), 'To run these tests, we need a (working!) %s file to already exist' % EM_CONFIG
-    assert not os.environ.get('EMCC_DEBUG'), 'do not run sanity checks in debug mode!'
-    assert not os.environ.get('EMCC_WASM_BACKEND'), 'do not force wasm backend either way in sanity checks!'
 
   @classmethod
   def tearDownClass(self):
@@ -741,7 +740,7 @@ fi
         print '    verify', lib
         assert os.path.exists(Cache.get_path(lib))
 
-  def test_d8_path(self):
+  def test_js_engine_path(self):
     """ Test that running JS commands works for node, d8, and jsc and is not path dependent """
     # Fake some JS engines
     restore()
@@ -753,27 +752,27 @@ fi
     if not os.path.exists(test_path):
       os.makedirs(test_path)
 
+    jsengines = [('d8',     V8_ENGINE),
+                 ('d8_g',   V8_ENGINE),
+                 ('js',     SPIDERMONKEY_ENGINE),
+                 ('node',   NODE_JS),
+                 ('nodejs', NODE_JS)]
+
+    os.environ['EM_IGNORE_SANITY'] = '1'
     try:
-      os.environ['EM_IGNORE_SANITY'] = '1'
-      jsengines = [('d8',     V8_ENGINE),
-                   ('d8_g',   V8_ENGINE),
-                   ('js',     SPIDERMONKEY_ENGINE),
-                   ('node',   NODE_JS),
-                   ('nodejs', NODE_JS)]
       for filename, engine in jsengines:
         if type(engine) is list:
           engine = engine[0]
-        if engine == '':
-            print 'WARNING: Not testing engine %s, not configured.' % (filename)
-            continue
+        if not engine:
+          print 'WARNING: Not testing engine %s, not configured.' % (filename)
+          continue
 
         print filename, engine
 
         test_engine_path = os.path.join(test_path, filename)
-        f = open(test_engine_path, 'w')
-        f.write('#!/bin/sh\n')
-        f.write('%s $@\n' % (engine))
-        f.close()
+        with open(test_engine_path, 'w') as f:
+          f.write('#!/bin/sh\n')
+          f.write('%s $@\n' % (engine))
         os.chmod(test_engine_path, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
 
         try:
