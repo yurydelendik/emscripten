@@ -320,6 +320,8 @@ EM_BUILD_VERBOSE_LEVEL = int(os.getenv('EM_BUILD_VERBOSE')) if os.getenv('EM_BUI
 
 # Expectations
 
+EXPECTED_LLVM_VERSION = (4, 0)
+
 actual_clang_version = None
 
 def expected_llvm_version():
@@ -1846,10 +1848,13 @@ class Building(object):
     if not just_calculate:
       link_args += ['-o', target]
       if get_llvm_target() == WASM_OBJ_TARGET:
-        cmd = [LLVM_LLD, '-flavor', 'wasm', '--strip-debug', '-allow-undefined', '-entry', 'main'] + link_args
+        lld_args = ['-flavor', 'wasm', '--strip-debug', '--import-memory', '-allow-undefined']
+        lld_args += ['-entry', 'main']
+        lld_args += ['--global-base=%d' % Settings.GLOBAL_BASE]
+        lld_args += ['--initial-memory=%d' % Settings.TOTAL_MEMORY]
+        check_call([LLVM_LLD] + lld_args + link_args)
       else:
-        cmd = [LLVM_LINK] + link_args
-      check_call(cmd)
+        check_call([LLVM_LINK] + link_args)
       return target
     else:
       # just calculating; return the link arguments which is the final list of files to link

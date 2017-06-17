@@ -384,9 +384,9 @@ Runtime.registerFunctions(%(sigs)s, Module);
 
 
 def write_output_file(outfile, post, module):
-  for chunk in module:
-    chunk = normalize_line_endings(chunk)
-    outfile.write(chunk)
+  for i in range(len(module)): # do this loop carefully to save memory
+    module[i] = normalize_line_endings(module[i])
+    outfile.write(module[i])
 
   post = normalize_line_endings(post)
   outfile.write(post)

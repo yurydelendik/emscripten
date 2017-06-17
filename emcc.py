@@ -1280,7 +1280,7 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
       # -E preprocessor-only support
       if '-E' in newargs or '-M' in newargs or '-MM' in newargs:
-        input_files = [x[1] for x in input_files]
+        input_files = map(lambda x: x[1], input_files)
         cmd = get_bitcode_args(input_files)
         if specified_target:
           cmd += ['-o', specified_target]
@@ -1353,8 +1353,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
       if final_suffix not in EXECUTABLE_SUFFIXES:
         if not specified_target:
           assert len(temp_files) == len(input_files)
-          for i, input_file in enumerate(input_files):
-            safe_move(temp_files[i][1], unsuffixed_basename(input_file[1]) + final_ending)
+          for i in range(len(input_files)):
+            safe_move(temp_files[i][1], unsuffixed_basename(input_files[i][1]) + final_ending)
         else:
           if len(input_files) == 1:
             _, input_file = input_files[0]
