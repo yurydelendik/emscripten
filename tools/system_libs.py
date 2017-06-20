@@ -17,6 +17,11 @@ def call_process(cmd):
 
 CORES = int(os.environ.get('EMCC_CORES') or multiprocessing.cpu_count())
 
+def make_emcc_command(command):
+  # we disable building ports when invoking emcc internally to build system libs. ports have already been
+  # computed in the main emcc invocation that called us, and it could lead to deadlocking
+  return command + ['-s', 'NO_PORTS=1']
+
 def run_commands(commands):
   cores = min(len(commands), CORES)
   if cores <= 1:
@@ -64,7 +69,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
       c_opts.append('-Wno-error=absolute-value')
     for src in files:
       o = in_temp(os.path.basename(src) + '.o')
-      commands.append([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', src), '-o', o] + musl_internal_includes + default_opts + c_opts + lib_opts)
+      commands.append(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', src), '-o', o] + musl_internal_includes + default_opts + c_opts + lib_opts))
       o_s.append(o)
     run_commands(commands)
     shared.Building.link(o_s, in_temp(lib_filename))
@@ -79,7 +84,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
     for src in files:
       o = in_temp(src + '.o')
       srcfile = shared.path_from_root(src_dirname, src)
-      commands.append([shared.PYTHON, shared.EMXX, srcfile, '-o', o, '-std=c++11'] + opts)
+      commands.append(make_emcc_command([shared.PYTHON, shared.EMXX, srcfile, '-o', o, '-std=c++11'] + opts))
       o_s.append(o)
     run_commands(commands)
     if lib_filename.endswith('.bc'):
@@ -193,7 +198,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
   # gl
   def create_gl(libname): # libname is ignored, this is just one .o file
     o = in_temp('gl.o')
-    check_call([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'gl.c'), '-o', o])
+    check_call(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'gl.c'), '-o', o]))
     return o
 
   def create_compiler_rt(libname):
@@ -205,7 +210,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
     commands = []
     for src in files:
       o = in_temp(os.path.basename(src) + '.o')
-      commands.append([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', src), '-O2', '-o', o])
+      commands.append(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', src), '-O2', '-o', o]))
       o_s.append(o)
     run_commands(commands)
     shared.Building.emar('cr', in_temp(libname), o_s)
@@ -213,7 +218,7 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
 
   def create_dlmalloc(out_name, clflags):
     o = in_temp(out_name)
-    check_call([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'dlmalloc.c'), '-o', o] + clflags)
+    check_call(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'dlmalloc.c'), '-o', o] + clflags))
     return o
 
   def create_dlmalloc_singlethreaded(libname):
@@ -230,9 +235,9 @@ def calculate(temp_files, in_temp, stdout_, stderr_, forced=[]):
 
   def create_dlmalloc_split(libname):
     dlmalloc_o = in_temp('dl' + libname)
-    check_call([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'dlmalloc.c'), '-o', dlmalloc_o, '-O2', '-DMSPACES', '-DONLY_MSPACES'])
+    check_call(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'dlmalloc.c'), '-o', dlmalloc_o, '-O2', '-DMSPACES', '-DONLY_MSPACES']))
     split_malloc_o = in_temp('sm' + libname)
-    check_call([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'split_malloc.cpp'), '-o', split_malloc_o, '-O2'])
+    check_call(make_emcc_command([shared.PYTHON, shared.EMCC, shared.path_from_root('system', 'lib', 'split_malloc.cpp'), '-o', split_malloc_o, '-O2']))
     lib = in_temp(libname)
     shared.Building.link([dlmalloc_o, split_malloc_o], lib)
     return lib
@@ -610,12 +615,25 @@ class Ports(object):
     finally:
       os.chdir(old)
 
+  @staticmethod
+  def process_dependencies(settings):
+    for port in reversed(ports.ports):
+      if hasattr(port, "process_dependencies"):
+        port.process_dependencies(settings)
+
+  @staticmethod
+  def process_args(args, settings):
+    Ports.process_dependencies(settings)
+    for port in ports.ports:
+      args = port.process_args(Ports, args, settings, shared)
+    return args
+
 def get_ports(settings):
   ret = []
 
   ok = False
   try:
-    process_dependencies(settings)
+    Ports.process_dependencies(settings)
     for port in ports.ports:
       # ports return their output files, which will be linked, or a txt file
       ret += filter(lambda f: not f.endswith('.txt'), port.get(Ports, settings, shared))
@@ -626,17 +644,6 @@ def get_ports(settings):
 
   ret.reverse()
   return ret
-
-def process_dependencies(settings):
-  for port in reversed(ports.ports):
-    if hasattr(port, "process_dependencies"):
-      port.process_dependencies(settings)
-
-def process_args(args, settings):
-  process_dependencies(settings)
-  for port in ports.ports:
-    args = port.process_args(Ports, args, settings, shared)
-  return args
 
 def show_ports():
   print 'Available ports:'

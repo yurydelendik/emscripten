@@ -1239,7 +1239,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
         args = newargs + shared.EMSDK_CXX_OPTS + headers
         if specified_target:
           args += ['-o', specified_target]
-        args = system_libs.process_args(args, shared.Settings)
+        if not shared.Settings.NO_PORTS:
+          args = system_libs.Ports.process_args(args, shared.Settings)
         logging.debug("running (for precompiled headers): " + call + ' ' + ' '.join(args))
         execute([call] + args) # let compiler frontend print directly, so colors are saved (PIPE kills that)
         sys.exit(0)
@@ -1273,7 +1274,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
           args += shared.EMSDK_CXX_OPTS
         if not shared.Building.can_inline():
           args.append('-fno-inline-functions')
-        args = system_libs.process_args(args, shared.Settings)
+        if not shared.Settings.NO_PORTS:
+          args = system_libs.Ports.process_args(args, shared.Settings)
         return args
 
       # -E preprocessor-only support
@@ -1397,7 +1399,8 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
          not shared.Settings.BOOTSTRAPPING_STRUCT_INFO and \
          not shared.Settings.ONLY_MY_CODE and \
          not shared.Settings.SIDE_MODULE: # shared libraries/side modules link no C libraries, need them in parent
-        extra_files_to_link = system_libs.get_ports(shared.Settings)
+        if not shared.Settings.NO_PORTS:
+          extra_files_to_link = system_libs.get_ports(shared.Settings)
         extra_files_to_link += system_libs.calculate([f for _, f in sorted(temp_files)] + extra_files_to_link, in_temp, stdout_=None, stderr_=None, forced=forced_stdlibs)
 
     # exit block 'calculate system libraries'
