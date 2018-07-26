@@ -19,6 +19,7 @@ import os
 import re
 from subprocess import Popen, PIPE
 import sys
+from get_dwarf_info import extract_debug_info, remove_dead_subprograms
 
 
 def parse_args():
@@ -33,6 +34,7 @@ def parse_args():
   parser.add_argument('-u', '--source-map-url', nargs='?', help='specifies sourceMappingURL section contest')
   parser.add_argument('--dwarfdump', help="path to llvm-dwarfdump executable")
   parser.add_argument('--dwarfdump-output', nargs='?', help=argparse.SUPPRESS)
+  parser.add_argument('--scope-info', action='store_true', help='adds information about functions and variables')
   return parser.parse_args()
 
 
@@ -164,7 +166,17 @@ def remove_dead_entries(entries):
     block_start = cur_entry
 
 
-def read_dwarf_entries(wasm, options):
+def load_source(file_name, load_prefixes):
+  load_name = load_prefixes.resolve(file_name)
+  try:
+    with open(load_name, 'r') as infile:
+      return infile.read()
+  except:
+    print('Failed to read source: %s' % load_name)
+    return None
+
+
+def read_dwarfdump_content(wasm, options):
   if options.dwarfdump_output:
     output = open(options.dwarfdump_output, 'r').read()
   elif options.dwarfdump:
@@ -181,9 +193,12 @@ def read_dwarf_entries(wasm, options):
   else:
     logging.error('Please specify either --dwarfdump or --dwarfdump-output')
     sys.exit(1)
+  return output
 
+
+def read_dwarf_entries(dwarfdump_content):
   entries = []
-  debug_line_chunks = re.split(r"debug_line\[(0x[0-9a-f]*)\]", output)
+  debug_line_chunks = re.split(r"debug_line\[(0x[0-9a-f]*)\]", dwarfdump_content)
   maybe_debug_info_content = debug_line_chunks[0]
   for i in range(1, len(debug_line_chunks), 2):
     stmt_list = debug_line_chunks[i]
@@ -264,14 +279,8 @@ def build_sourcemap(entries, code_section_offset, prefixes, collect_sources):
       sources_map[source_name] = source_id
       sources.append(source_name)
       if collect_sources:
-        load_name = prefixes.load.resolve(file_name)
-        try:
-          with open(load_name, 'r') as infile:
-            source_content = infile.read()
-          sources_content.append(source_content)
-        except:
-          print('Failed to read source: %s' % load_name)
-          sources_content.append(None)
+        source_content = load_source(file_name, prefixes.load)
+        sources_content.append(source_content)
     else:
       source_id = sources_map[source_name]
 
@@ -288,8 +297,47 @@ def build_sourcemap(entries, code_section_offset, prefixes, collect_sources):
                       ('names', []),
                       ('sources', sources),
                       ('sourcesContent', sources_content),
-                      ('mappings', ','.join(mappings))])
+                      ('mappings', ','.join(mappings))]), sources_map
 
+
+def map_source_name(file_name, sources_map, prefixes, comp_dir, map):
+  if file_name[0] != '/' and comp_dir is not None:
+    file_name = comp_dir + '/' + file_name
+  source_name = prefixes[0].resolve(file_name)
+  if source_name in sources_map:
+    return sources_map[source_name]
+
+  source_id = len(map['sources'])
+  map['sources'].append(source_name)
+  if 'sourcesContent' in map and isinstance(map['sourcesContent'], list):
+    source_content = load_source(file_name, prefixes[1])
+    map['sourcesContent'].append(source_content)
+  sources_map[source_name] = source_id
+  return source_id
+
+
+def replace_file_names(items, sources_map, prefixes, map, comp_dir = None):
+  assert isinstance(items, list)
+  for x in items:
+    assert isinstance(x, OrderedDict)
+
+    if 'comp_dir' in x:
+      comp_dir = x['comp_dir']
+      del x['comp_dir']
+    if 'decl_file' in x:
+      x['decl_file'] = map_source_name(x['decl_file'], sources_map, prefixes, comp_dir, map)
+    if 'call_file' in x:
+      x['call_file'] = map_source_name(x['call_file'], sources_map, prefixes, comp_dir, map)
+
+    if 'children' in x:
+      replace_file_names(x['children'], sources_map, prefixes, map, comp_dir)
+
+
+def build_scope_info(dwarfdump_content, code_section_offset, sources_map, prefixes, map):
+  debug_info = extract_debug_info(dwarfdump_content)
+  remove_dead_subprograms(debug_info)
+  replace_file_names(debug_info, sources_map, prefixes, map)
+  return OrderedDict([('debug_info', debug_info), ('code_section_offset', code_section_offset)])
 
 def main():
   options = parse_args()
@@ -297,15 +345,18 @@ def main():
   wasm_input = options.wasm
   with open(wasm_input, 'rb') as infile:
     wasm = infile.read()
+  dwarfdump_content = read_dwarfdump_content(wasm_input, options)
 
-  entries = read_dwarf_entries(wasm_input, options)
+  entries = read_dwarf_entries(dwarfdump_content)
 
   code_section_offset = get_code_section_offset(wasm)
 
   prefixes = SourceMapPrefixes(sources=Prefixes(options.prefix), load=Prefixes(options.load_prefix))
 
   logging.debug('Saving to %s' % options.output)
-  map = build_sourcemap(entries, code_section_offset, prefixes, options.sources)
+  map, sources_map = build_sourcemap(entries, code_section_offset, prefixes, options.sources)
+  if options.scope_info:
+    map['x-scopes'] = build_scope_info(dwarfdump_content, code_section_offset, sources_map, prefixes, map)
   with open(options.output, 'w') as outfile:
     json.dump(map, outfile, separators=(',', ':'))
 
