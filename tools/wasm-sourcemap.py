@@ -225,7 +225,7 @@ def read_dwarf_entries(dwarfdump_content):
 
     include_directories = {'0': comp_dir}
     for dir in re.finditer(r"include_directories\[\s*(\d+)\] = \"([^\"]*)", line_chunk):
-      include_directories[dir.group(1)] = dir.group(2)
+      include_directories[dir.group(1)] = (comp_dir + '/' if dir.group(2)[0] != '/' else '') + dir.group(2)
 
     files = {}
     for file in re.finditer(r"file_names\[\s*(\d+)\]:\s+name: \"([^\"]*)\"\s+dir_index: (\d+)", line_chunk):
